@@ -56,9 +56,15 @@ contract Liquidator is IUniswapV2Callee, Ownable {
         require(amount0 > 0 || amount1 > 0, "amount0 or amount1 must be greater than 0");
 
         // 4. decode callback data
-        // 5. call liquidate
+        (address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut) = abi.decode(data, (address, address, uint256, uint256));
+        // 5. call liquidate - 拿 80U 去換 1 ETH
+        IERC20(tokenIn).approve(_FAKE_LENDING_PROTOCOL, amountIn);
+        IFakeLendingProtocol(_FAKE_LENDING_PROTOCOL).liquidatePosition();
         // 6. deposit ETH to WETH9, because we will get ETH from lending protocol
+        IWETH(tokenOut).deposit{value: amountOut}();
         // 7. repay WETH to uniswap pool
+        IWETH(tokenOut).transfer(msg.sender, amountOut);
+        // require(IWETH(tokenOut).transfer(msg.sender, amountOut), "repay failed");
 
         // check profit
         require(address(this).balance >= _MINIMUM_PROFIT, "Profit must be greater than 0.01 ether");
@@ -67,9 +73,31 @@ contract Liquidator is IUniswapV2Callee, Ownable {
     // we use single hop path for testing
     function liquidate(address[] calldata path, uint256 amountOut) external {
         require(amountOut > 0, "AmountOut must be greater than 0");
+        // path[0] : weth
+        // path[1] : usdc
         // 1. get uniswap pool address
+        address pool = IUniswapV2Factory(_UNISWAP_FACTORY).getPair(path[0], path[1]);
         // 2. calculate repay amount
+        uint256 repayAmount = IUniswapV2Router01(_UNISWAP_ROUTER).getAmountsIn(amountOut, path)[0];
         // 3. flash swap from uniswap pool
+        // CallbackData data = {
+        //   tokenIn: path[1],
+        //   tokenOut: path[0],
+        //   amountIn: amountOut,
+        //   amountOut: repayAmount
+        // }
+        CallbackData memory data;
+        data.tokenIn = path[1]; // u
+        data.tokenOut = path[0]; // e
+        data.amountIn = amountOut;
+        data.amountOut = repayAmount;
+        IUniswapV2Pair(pool).swap(0, amountOut, address(this), abi.encode(data));
+
+        // function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external;
+        /**
+        1. uniswap 借出 80 USDC，
+
+         */
     }
 
     receive() external payable {}
