@@ -54,14 +54,18 @@ contract Liquidator is IUniswapV2Callee, Ownable {
     // UniSwap - WETH/USDC Pool - 100 WETH : 10,000 USDC  ->  1eth = 100usdc
     // lendProtocol - give me 80 usdc, I give you 1 eth
 
-    // step :
-    // 1. get pool address (WETH/USDC) - Factory.getPair(address tokenA, address tokenB) external view returns (address pair);
-    // 2. 想跟 uniswap 換 80usdc 出來
-    // 3. 確認換 80usdc 出來，要打多少 weth 進去 - Router01.getAmountsIn(uint amountOut, address[] calldata path) external view returns (uint[] memory amounts);
-    // 4. call swap 換 80 usdc 出來
-    // 5. 拿到 usdc 後，去 lendProtocol 用 80 usdc 換 1 eth
-    // 6. 拿到 1 eth 後，把 eth 拿去還
-    // 7. 剩下來多的，就是賺的
+    /*
+    step :
+    1. get pool address (WETH/USDC) - Factory.getPair(address tokenA, address tokenB) external view returns (address pair);
+    2. 確認換 80usdc 出來，要打多少 weth 進去 - Router01.getAmountsIn(uint amountOut, address[] calldata path) external view returns (uint[] memory amounts);
+    3. 跟 UniSwap 進行「你先給我錢，再去call 我指定的 func，再去驗證我有沒有還錢」的 Swap - Pair.function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external;
+      3 - 0.  拿到 80 usdc 了
+      3 - 1. 透過之前學的 abi.encode，把想帶的參數 encode 成一個變數打進 uniswap call 套利合約的 uniswapV2Call 中
+      3 - 2. decode 剛剛打進來的參數
+      3 - 3. 執行利套利邏輯
+      3 - 4. 還錢!!
+    4. 剩下來多的，就是賺的
+    */
     function uniswapV2Call(address sender, uint256 amount0, uint256 amount1, bytes calldata data) external override {
         require(sender == address(this), "Sender must be this contract");
         require(amount0 > 0 || amount1 > 0, "amount0 or amount1 must be greater than 0");
