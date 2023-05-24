@@ -51,20 +51,32 @@ contract Liquidator is IUniswapV2Callee, Ownable {
     // EXTERNAL NON-VIEW
     //
 
+    // UniSwap - WETH/USDC Pool - 100 WETH : 10,000 USDC  ->  1eth = 100usdc
+    // lendProtocol - give me 80 usdc, I give you 1 eth
+
+    // step :
+    // 1. get pool address (WETH/USDC) - Factory.getPair(address tokenA, address tokenB) external view returns (address pair);
+    // 2. 想跟 uniswap 換 80usdc 出來
+    // 3. 確認換 80usdc 出來，要打多少 weth 進去 - Router01.getAmountsIn(uint amountOut, address[] calldata path) external view returns (uint[] memory amounts);
+    // 4. call swap 換 80 usdc 出來
+    // 5. 拿到 usdc 後，去 lendProtocol 用 80 usdc 換 1 eth
+    // 6. 拿到 1 eth 後，把 eth 拿去還
+    // 7. 剩下來多的，就是賺的
     function uniswapV2Call(address sender, uint256 amount0, uint256 amount1, bytes calldata data) external override {
         require(sender == address(this), "Sender must be this contract");
         require(amount0 > 0 || amount1 > 0, "amount0 or amount1 must be greater than 0");
 
         // 4. decode callback data
         (address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut) = abi.decode(data, (address, address, uint256, uint256));
-        // 5. call liquidate - 拿 80U 去換 1 ETH
-        IERC20(tokenIn).approve(_FAKE_LENDING_PROTOCOL, amountIn);
+        // 5. call liquidate
+        IERC20(tokenOut).approve(_FAKE_LENDING_PROTOCOL, amountOut);
         IFakeLendingProtocol(_FAKE_LENDING_PROTOCOL).liquidatePosition();
         // 6. deposit ETH to WETH9, because we will get ETH from lending protocol
-        IWETH(tokenOut).deposit{value: amountOut}();
+        // IWETH(_WETH9).deposit{value: amountIn}();
+        IWETH(tokenIn).deposit{value: amountIn}();
         // 7. repay WETH to uniswap pool
-        IWETH(tokenOut).transfer(msg.sender, amountOut);
-        // require(IWETH(tokenOut).transfer(msg.sender, amountOut), "repay failed");
+        // IWETH(_WETH9).transfer(address(this), amountIn);
+        IWETH(tokenIn).transfer(msg.sender, amountIn);    // 把錢還給 uni swap pool, 因為這個 func 是 uniswap pool call 的, 所以是還給 msg.sender
 
         // check profit
         require(address(this).balance >= _MINIMUM_PROFIT, "Profit must be greater than 0.01 ether");
@@ -73,31 +85,21 @@ contract Liquidator is IUniswapV2Callee, Ownable {
     // we use single hop path for testing
     function liquidate(address[] calldata path, uint256 amountOut) external {
         require(amountOut > 0, "AmountOut must be greater than 0");
-        // path[0] : weth
-        // path[1] : usdc
+        // path[0] = weth
+        // path[1] = usdc
+        // amountOut = 80 usdc
         // 1. get uniswap pool address
         address pool = IUniswapV2Factory(_UNISWAP_FACTORY).getPair(path[0], path[1]);
         // 2. calculate repay amount
-        uint256 repayAmount = IUniswapV2Router01(_UNISWAP_ROUTER).getAmountsIn(amountOut, path)[0];
+        uint amountIn = IUniswapV2Router01(_UNISWAP_ROUTER).getAmountsIn(amountOut, path)[0];
         // 3. flash swap from uniswap pool
-        // CallbackData data = {
-        //   tokenIn: path[1],
-        //   tokenOut: path[0],
-        //   amountIn: amountOut,
-        //   amountOut: repayAmount
-        // }
         CallbackData memory data;
-        data.tokenIn = path[1]; // u
-        data.tokenOut = path[0]; // e
-        data.amountIn = amountOut;
-        data.amountOut = repayAmount;
+        data.tokenIn = path[0];   // weth
+        data.tokenOut = path[1];  // usdc
+        data.amountIn = amountIn;
+        data.amountOut = amountOut;
+        // IUniswapV2Pair(pool).swap(0, amountOut, msg.sender, abi.encode(data));
         IUniswapV2Pair(pool).swap(0, amountOut, address(this), abi.encode(data));
-
-        // function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external;
-        /**
-        1. uniswap 借出 80 USDC，
-
-         */
     }
 
     receive() external payable {}
