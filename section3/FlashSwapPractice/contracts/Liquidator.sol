@@ -14,11 +14,17 @@ import { IFakeLendingProtocol } from "./interfaces/IFakeLendingProtocol.sol";
 // all you need to implement is flash swap from uniswap pool and call lending protocol liquidate function in uniswapV2Call
 // lending protocol liquidate rule can be found in FakeLendingProtocol.sol
 contract Liquidator is IUniswapV2Callee, Ownable {
+    // struct CallbackData {
+    //     address tokenIn;
+    //     address tokenOut;
+    //     uint256 amountIn;
+    //     uint256 amountOut;
+    // }
     struct CallbackData {
-        address tokenIn;
-        address tokenOut;
-        uint256 amountIn;
-        uint256 amountOut;
+      address borrowToken;
+      address repayToken;
+      uint256 borrowTokenAmount;
+      uint256 repayTokenAmount;
     }
 
     address internal immutable _FAKE_LENDING_PROTOCOL;
@@ -71,20 +77,19 @@ contract Liquidator is IUniswapV2Callee, Ownable {
         require(amount0 > 0 || amount1 > 0, "amount0 or amount1 must be greater than 0");
 
         // 4. decode callback data
-        (address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut) = abi.decode(data, (address, address, uint256, uint256));
+        (address borrowToken, address repayToken, uint256 borrowTokenAmount, uint256 repayTokenAmount) = abi.decode(data, (address, address, uint256, uint256));
         // 5. call liquidate
-        IERC20(tokenOut).approve(_FAKE_LENDING_PROTOCOL, amountOut);
+        IERC20(borrowToken).approve(_FAKE_LENDING_PROTOCOL, borrowTokenAmount);
         IFakeLendingProtocol(_FAKE_LENDING_PROTOCOL).liquidatePosition();
         // 6. deposit ETH to WETH9, because we will get ETH from lending protocol
-        // IWETH(_WETH9).deposit{value: amountIn}();
-        IWETH(tokenIn).deposit{value: amountIn}();
+        IWETH(repayToken).deposit{value: repayTokenAmount}();
         // 7. repay WETH to uniswap pool
-        // IWETH(_WETH9).transfer(address(this), amountIn);
-        IWETH(tokenIn).transfer(msg.sender, amountIn);    // 把錢還給 uni swap pool, 因為這個 func 是 uniswap pool call 的, 所以是還給 msg.sender
+        IWETH(repayToken).transfer(msg.sender, repayTokenAmount);    // 把錢還給 uni swap pool, 因為這個 func 是 uniswap pool call 的, 所以是還給 msg.sender
 
         // check profit
         require(address(this).balance >= _MINIMUM_PROFIT, "Profit must be greater than 0.01 ether");
     }
+
 
     // we use single hop path for testing
     function liquidate(address[] calldata path, uint256 amountOut) external {
@@ -98,11 +103,10 @@ contract Liquidator is IUniswapV2Callee, Ownable {
         uint amountIn = IUniswapV2Router01(_UNISWAP_ROUTER).getAmountsIn(amountOut, path)[0];
         // 3. flash swap from uniswap pool
         CallbackData memory data;
-        data.tokenIn = path[0];   // weth
-        data.tokenOut = path[1];  // usdc
-        data.amountIn = amountIn;
-        data.amountOut = amountOut;
-        // IUniswapV2Pair(pool).swap(0, amountOut, msg.sender, abi.encode(data));
+        data.borrowToken = path[1]; // usdc
+        data.repayToken = path[0];  // weth
+        data.borrowTokenAmount = amountOut;
+        data.repayTokenAmount = amountIn;
         IUniswapV2Pair(pool).swap(0, amountOut, address(this), abi.encode(data));
     }
 
